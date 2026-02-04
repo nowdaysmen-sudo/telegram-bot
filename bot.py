@@ -181,9 +181,12 @@ async def main():
 
     await app.initialize()
     await app.start()
+
+    # 🔥 هنا الويب هوك الجديد الصحيح
     await app.bot.set_webhook(
-        url="https://shaggy-ludovika-qht-c78424f5.koyeb.app/"
+        url="https://healthy-vitia-qht-5e46f5a9.koyeb.app/"
     )
+
     await app.run_webhook(
         listen="0.0.0.0",
         port=8000,
