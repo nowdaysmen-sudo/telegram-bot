@@ -1,25 +1,14 @@
 import os
 import logging
 import requests
-import threading
-from http.server import SimpleHTTPRequestHandler, HTTPServer
 from telegram import Update
 from telegram.ext import (
-    Application,
+    ApplicationBuilder,
     CommandHandler,
     MessageHandler,
     ContextTypes,
     filters,
 )
-
-# ----------------------------------------
-# 1) تشغيل سيرفر وهمي لـ Koyeb على المنفذ 8000
-# ----------------------------------------
-def run_server():
-    server = HTTPServer(("0.0.0.0", 8000), SimpleHTTPRequestHandler)
-    server.serve_forever()
-
-threading.Thread(target=run_server, daemon=True).start()
 
 # ===== إعداد اللوق =====
 logging.basicConfig(
@@ -164,9 +153,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(reply)
 
 
-# ===== تشغيل Webhook =====
-async def main():
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
+# ===== تشغيل Polling =====
+def main():
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
@@ -179,21 +168,8 @@ async def main():
     app.add_handler(CommandHandler("plan", plan))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    await app.initialize()
-    await app.start()
-
-    # 🔥 هنا الويب هوك الجديد الصحيح
-    await app.bot.set_webhook(
-        url="https://healthy-vitia-qht-5e46f5a9.koyeb.app/"
-    )
-
-    await app.run_webhook(
-        listen="0.0.0.0",
-        port=8000,
-        url_path="",
-    )
+    app.run_polling()
 
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    main()
