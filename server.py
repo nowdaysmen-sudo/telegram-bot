@@ -187,8 +187,12 @@ def webhook():
         json_data = request.get_json(force=True)
         update = Update.de_json(json_data, application.bot)
         
-        # تشغيل async function في event loop جديد
-        asyncio.run(application.process_update(update))
+        # تشغيل async function مع initialization
+        async def process():
+            async with application:
+                await application.process_update(update)
+        
+        asyncio.run(process())
         
         return "OK", 200
     except Exception as e:
