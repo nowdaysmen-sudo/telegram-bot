@@ -1,3 +1,5 @@
-python-telegram-bot==21.0
-flask
-requests
+python-telegram-bot==22.0
+flask[async]==3.1.0
+uvicorn==0.34.0
+asgiref==3.8.1
+requests==2.32.3
