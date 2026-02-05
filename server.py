@@ -70,7 +70,7 @@ def call_gemini_api(user_id: int, user_message: str, mode: str = "chat") -> str:
 
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
-        "gemini-1.5-flash:generateContent"
+        "gemini-2.0-flash:generateContent"
         f"?key={GEMINI_API_KEY}"
     )
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
