@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # ===== مفاتيح من Environment Variables =====
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://healthy-vitia-qht-5e46f5a9.koyeb.app")
 
 if not TELEGRAM_TOKEN:
@@ -68,20 +68,25 @@ def call_gemini_api(user_id: int, user_message: str, mode: str = "chat") -> str:
 
         prompt = base_instruction + "سياق المحادثة:\n" + messages_text + "ASSISTANT:"
 
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        "gemini-2.0-flash:generateContent"
-        f"?key={GEMINI_API_KEY}"
-    )
-    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": "llama-3.3-70b-versatile",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.7,
+        "max_tokens": 1024
+    }
 
     try:
-        resp = requests.post(url, json=payload, timeout=30)
+        resp = requests.post(url, headers=headers, json=payload, timeout=30)
         resp.raise_for_status()
         data = resp.json()
-        text = data["candidates"][0]["content"]["parts"][0]["text"]
+        text = data["choices"][0]["message"]["content"]
     except Exception as e:
-        logger.error(f"Gemini API error: {e}")
+        logger.error(f"Groq API error: {e}")
         text = "صار خطأ، جرّب بعد شوي."
 
     if mode == "chat":
