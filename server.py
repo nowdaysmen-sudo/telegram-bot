@@ -1,73 +1,47 @@
-import os
-import logging
-import requests
+#!/usr/bin/env python
+# Telegram Bot with Groq API integration
+# Based on python-telegram-bot official example
+
 import asyncio
-from flask import Flask, request
+import logging
+import os
+from http import HTTPStatus
+
+import requests
+import uvicorn
+from asgiref.wsgi import WsgiToAsgi
+from flask import Flask, Response, make_response, request
+
 from telegram import Update
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
-    ContextTypes,
     filters,
 )
 
-# ===== إعداد اللوق =====
+# Enable logging
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
-# ===== مفاتيح من Environment Variables =====
+# Configuration from environment variables
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://healthy-vitia-qht-5e46f5a9.koyeb.app")
+PORT = 8000
 
 if not TELEGRAM_TOKEN:
     raise RuntimeError("TELEGRAM_TOKEN is not set in environment variables.")
-if not GEMINI_API_KEY:
-    raise RuntimeError("GEMINI_API_KEY is not set in environment variables.")
-
-# ===== ذاكرة بسيطة لكل مستخدم =====
-user_context = {}  # user_id -> list of messages
+if not GROQ_API_KEY:
+    raise RuntimeError("GROQ_API_KEY is not set in environment variables.")
 
 
-def call_gemini_api(user_id: int, user_message: str, mode: str = "chat") -> str:
-    history = user_context.get(user_id, [])
-
-    base_instruction = (
-        "أنت مساعد شخصي عربي، مطيع قدر الإمكان، تحاول تنفيذ طلب المستخدم بدون جدال، "
-        "وترد باختصار ووضوح، لكن تتجنب أي شيء ضار أو غير قانوني أو مؤذٍ.\n"
-    )
-
-    if mode == "summarize":
-        task_instruction = "مهمتك الآن: تلخيص النص التالي:\n"
-    elif mode == "rewrite":
-        task_instruction = "مهمتك الآن: إعادة صياغة النص:\n"
-    elif mode == "reply":
-        task_instruction = "مهمتك الآن: كتابة رد مناسب:\n"
-    elif mode == "idea":
-        task_instruction = "مهمتك الآن: اقتراح أفكار:\n"
-    elif mode == "plan":
-        task_instruction = "مهمتك الآن: وضع خطة:\n"
-    else:
-        task_instruction = "محادثة ذكية:\n"
-
-    prompt = base_instruction + task_instruction + user_message
-
-    if mode == "chat":
-        history.append({"role": "user", "content": user_message})
-        if len(history) > 10:
-            history = history[-10:]
-        user_context[user_id] = history
-
-        messages_text = ""
-        for msg in history:
-            messages_text += f"{msg['role'].upper()}: {msg['content']}\n"
-
-        prompt = base_instruction + "سياق المحادثة:\n" + messages_text + "ASSISTANT:"
-
+def call_groq_api(prompt: str) -> str:
+    """Call Groq API and return the response."""
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -84,150 +58,85 @@ def call_gemini_api(user_id: int, user_message: str, mode: str = "chat") -> str:
         resp = requests.post(url, headers=headers, json=payload, timeout=30)
         resp.raise_for_status()
         data = resp.json()
-        text = data["choices"][0]["message"]["content"]
+        return data["choices"][0]["message"]["content"]
     except Exception as e:
         logger.error(f"Groq API error: {e}")
-        text = "صار خطأ، جرّب بعد شوي."
-
-    if mode == "chat":
-        history.append({"role": "assistant", "content": text})
-        user_context[user_id] = history
-
-    return text
+        return "عذراً، حدث خطأ. حاول مرة أخرى."
 
 
-# ===== أوامر البوت =====
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("هلا، أنا الإيجنت حقك 🌙")
-
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update: Update, context) -> None:
+    """Handle /start command."""
     await update.message.reply_text(
-        "/start\n/help\n/ping\n/clear\n/summarize\n/rewrite\n/reply\n/idea\n/plan"
+        "مرحباً! أنا بوت ذكي يستخدم Groq AI.\n"
+        "أرسل لي أي رسالة وسأرد عليك! 🤖"
     )
 
 
-async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("البوت شغال ✅")
+async def handle_message(update: Update, context) -> None:
+    """Handle incoming messages."""
+    user_message = update.message.text
+    logger.info(f"Received message: {user_message}")
+    
+    # Call Groq API
+    response = call_groq_api(user_message)
+    
+    # Send response
+    await update.message.reply_text(response)
 
 
-async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_context.pop(update.effective_user.id, None)
-    await update.message.reply_text("تم مسح السياق 🤍")
+async def main() -> None:
+    """Set up PTB application and web server."""
+    # Create application
+    application = (
+        Application.builder()
+        .token(TELEGRAM_TOKEN)
+        .updater(None)  # We handle updates manually via webhook
+        .build()
+    )
 
+    # Register handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-async def summarize(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = " ".join(context.args)
-    if not text:
-        return await update.message.reply_text("استخدم:\n/summarize نص")
-    reply = call_gemini_api(update.effective_user.id, text, "summarize")
-    await update.message.reply_text(reply)
+    # Set webhook
+    await application.bot.set_webhook(url=f"{WEBHOOK_URL}/webhook", allowed_updates=Update.ALL_TYPES)
+    logger.info(f"Webhook set to: {WEBHOOK_URL}/webhook")
 
+    # Set up Flask webserver
+    flask_app = Flask(__name__)
 
-async def rewrite(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = " ".join(context.args)
-    if not text:
-        return await update.message.reply_text("استخدم:\n/rewrite نص")
-    reply = call_gemini_api(update.effective_user.id, text, "rewrite")
-    await update.message.reply_text(reply)
+    @flask_app.post("/webhook")
+    async def webhook() -> Response:
+        """Handle incoming Telegram updates."""
+        await application.update_queue.put(
+            Update.de_json(data=request.json, bot=application.bot)
+        )
+        return Response(status=HTTPStatus.OK)
 
+    @flask_app.get("/")
+    async def health() -> Response:
+        """Health check endpoint."""
+        response = make_response("Bot is running! 🤖", HTTPStatus.OK)
+        response.mimetype = "text/plain"
+        return response
 
-async def reply_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = " ".join(context.args)
-    if not text:
-        return await update.message.reply_text("استخدم:\n/reply نص")
-    reply = call_gemini_api(update.effective_user.id, text, "reply")
-    await update.message.reply_text(reply)
+    # Configure uvicorn server
+    webserver = uvicorn.Server(
+        config=uvicorn.Config(
+            app=WsgiToAsgi(flask_app),
+            port=PORT,
+            use_colors=False,
+            host="0.0.0.0",  # Listen on all interfaces for Koyeb
+        )
+    )
 
-
-async def idea(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = " ".join(context.args)
-    if not text:
-        return await update.message.reply_text("استخدم:\n/idea نص")
-    reply = call_gemini_api(update.effective_user.id, text, "idea")
-    await update.message.reply_text(reply)
-
-
-async def plan_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = " ".join(context.args)
-    if not text:
-        return await update.message.reply_text("استخدم:\n/plan نص")
-    reply = call_gemini_api(update.effective_user.id, text, "plan")
-    await update.message.reply_text(reply)
-
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    reply = call_gemini_api(update.effective_user.id, update.message.text, "chat")
-    await update.message.reply_text(reply)
-
-
-# ===== إنشاء Application =====
-application = Application.builder().token(TELEGRAM_TOKEN).build()
-
-# إضافة handlers
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CommandHandler("help", help_command))
-application.add_handler(CommandHandler("ping", ping))
-application.add_handler(CommandHandler("clear", clear))
-application.add_handler(CommandHandler("summarize", summarize))
-application.add_handler(CommandHandler("rewrite", rewrite))
-application.add_handler(CommandHandler("reply", reply_cmd))
-application.add_handler(CommandHandler("idea", idea))
-application.add_handler(CommandHandler("plan", plan_cmd))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-# ===== Flask App =====
-app = Flask(__name__)
-
-
-@app.route("/")
-def home():
-    return "Bot is running! ✅"
-
-
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    """استقبال updates من Telegram"""
-    try:
-        json_data = request.get_json(force=True)
-        update = Update.de_json(json_data, application.bot)
-        
-        # تشغيل async function مع initialization
-        async def process():
-            async with application:
-                await application.process_update(update)
-        
-        asyncio.run(process())
-        
-        return "OK", 200
-    except Exception as e:
-        logger.error(f"Webhook error: {e}")
-        return "Error", 500
-
-
-@app.route("/set_webhook", methods=["GET"])
-def set_webhook():
-    """تعيين webhook URL في Telegram"""
-    webhook_url = f"{WEBHOOK_URL}/webhook"
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setWebhook?url={webhook_url}"
-    try:
-        response = requests.get(url)
-        return response.json()
-    except Exception as e:
-        return {"error": str(e)}
+    # Run application and webserver together
+    async with application:
+        await application.start()
+        logger.info(f"Starting Flask server on port {PORT}...")
+        await webserver.serve()
+        await application.stop()
 
 
 if __name__ == "__main__":
-    # تعيين webhook تلقائياً عند التشغيل
-    logger.info("Setting up webhook...")
-    webhook_url = f"{WEBHOOK_URL}/webhook"
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setWebhook?url={webhook_url}"
-    try:
-        response = requests.get(url)
-        logger.info(f"Webhook setup response: {response.json()}")
-    except Exception as e:
-        logger.error(f"Failed to set webhook: {e}")
-    
-    # تشغيل Flask
-    logger.info("Starting Flask server on port 8000...")
-    app.run(host="0.0.0.0", port=8000)
+    asyncio.run(main())
